@@ -11,6 +11,20 @@ jobs:
       contents: write
       issues: write
     steps:
+      - name: Comment this GitHub action URL
+        uses: actions/github-script@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { issue, runId } = context,
+              { owner, repo } = context.repo;
+
+            github.issues.createComment({
+              issue_number: issue.number,
+              owner,
+              repo,
+              body: `The GitHub action URL is: https://github.com/${owner}/${repo}/actions/runs/${runId}`  
+            });
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -79,7 +93,11 @@ jobs:
           source-dir: "${{ env.FILE_PATH }}.html"
           destination-dir: "${{ env.FOLDER_PATH }}"
 
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: >
-            [add] ${{ github.event.issue.title }} (closes #${{ github.event.issue.number }})
+      - name: Git commit
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add .
+          git commit -m "[add] ${{ github.event.issue.title }} (closes #${{ github.event.issue.number }})"
+          git rebase origin/main
+          git push
