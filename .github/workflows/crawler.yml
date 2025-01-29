@@ -99,5 +99,6 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git add .
           git commit -m "[add] ${{ github.event.issue.title }} (closes #${{ github.event.issue.number }})"
+          git fetch
           git rebase origin/main
           git push
