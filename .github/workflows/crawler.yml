@@ -3,45 +3,41 @@ on:
   issues:
     types:
       - labeled
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL of the file or Web page to download'
+        required: true
+        type: string
+env:
+  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+
 jobs:
   Fetch-and-Save:
-    if: github.event.label.name == 'crawler'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'issues' && github.event.label.name == 'crawler')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: write
     steps:
-      - name: Comment this GitHub action URL
-        uses: actions/github-script@v4
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const { issue, runId } = context,
-              { owner, repo } = context.repo;
-
-            github.issues.createComment({
-              issue_number: issue.number,
-              owner,
-              repo,
-              body: `The GitHub action URL is: https://github.com/${owner}/${repo}/actions/runs/${runId}`  
-            });
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - uses: actions/checkout@v4
 
       - id: issue-parser
+        if: github.event_name == 'issues'
         uses: stefanbuck/github-issue-parser@v3
         with:
           template-path: ".github/ISSUE_TEMPLATE/crawler.yml"
 
       - name: Set URL & MIME variables
         env:
-          URL: ${{ steps.issue-parser.outputs.issueparser_url }}
+          URL: ${{ github.event_name == 'workflow_dispatch' && inputs.url || (github.event_name == 'issues' && steps.issue-parser.outputs.issueparser_url) }}
         run: |
           cat >> $GITHUB_ENV <<EOF
           FILE_URL=$URL
@@ -61,6 +57,17 @@ jobs:
           EOF
           mkdir -p $FOLDER_PATH
 
+      - name: Comment Cache URLs
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat >> comment.md <<EOF
+          - The GitHub action URL is: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - JSDelivr URL: https://cdn.jsdelivr.net/gh/${{ github.repository }}@${{ github.ref_name }}/${{ env.FILE_PATH }}
+          EOF
+          gh issue comment ${{ github.event.issue.number }} --body-file comment.md
+
       - name: Download the File
         if: env.MIME_TYPE != 'text/html'
         run: curl -s -o "${{ env.FILE_PATH }}" "${{ env.FILE_URL }}"
@@ -75,6 +82,7 @@ jobs:
           pnpx web-fetch "${{ env.FILE_URL }}"
 
       - uses: ryand56/r2-upload-action@master
+        if: env.R2_ACCOUNT_ID != ''
         with:
           r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -98,7 +106,11 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           git add .
-          git commit -m "[add] ${{ github.event.issue.title }} (closes #${{ github.event.issue.number }})"
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            git commit -m "[add] ${{ github.event.issue.title }} (closes #${{ github.event.issue.number }})"
+          else
+            git commit -m "[add] Cache file from workflow_dispatch: ${{ inputs.url }}"
+          fi
           git fetch
           git rebase origin/main
           git push
